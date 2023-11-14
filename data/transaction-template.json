@@ -1,0 +1,62 @@
+[
+[
+  "EVENT",
+  "query:data",
+  {
+    "id": "6a3bfbb895cb81cd49478afb96626438fc282b52ddee16cd3f5c15328adb25b8",
+    "kind": 1112,
+    "pubkey": "e17feb5f2cf83546bcf7fd9c8237b05275be958bd521543c2285ffc6c2d654b3",
+    "created_at": 1699079668,
+    "content": "{\"tokens\":{\"BTC\":\"1000\"}}",
+    "tags": [
+      [
+        "p",
+        "bd9b0b60d5cd2a9df282fc504e88334995e6fac8b148fa89e0f8c09e2a570a84"
+      ],
+      [
+        "p",
+        "c5704c447d7712ce28e7098f5237b2a51aeb441e7778265a043f0f7e703846de"
+      ],
+      [
+        "t",
+        "inbound-transaction-start"
+      ],
+      [
+        "bolt11",
+        "lnbc10n1pj5te00pp5c5tlp4gadzkfef2u95ja9jqevrskl244kxj6n0eqs95s4n48n2lshp5wh3x2fmc3nwhjqfv3czss6lndyxsvyskykgdzus3t5cyjs0sf6sqcqzzsxqzjcsp5lwmh9yeae9u7r9eq9gxcl4prcujuc236guhtqh2f9vjkpl996sys9qyyssqla4f6hvxxt8uh93g04f5ue64twd940362ne2zqvef3f495nknl73wlhy8827g8ej768c6w887wz57gfl3828lzqrmt7dm5te5hru7qcq09exkz"
+      ]
+    ],
+    "sig": "94a89af3018ef2ab3fc84ac52c069ce59c38929d5a03fc2d12235a2a12bf69d2c1b521fa777537ff8b7cb8a087c28b4abf35a5d53efb54ffd4c7c6f268af7bb5"
+  }
+],
+[
+  "EVENT",
+  "query:data",
+  {
+    "id": "af625414d3b8e95b192bab67446edf77687cd9d59c03c2a97c664a79c7528c04",
+    "kind": 1112,
+    "pubkey": "bd9b0b60d5cd2a9df282fc504e88334995e6fac8b148fa89e0f8c09e2a570a84",
+    "created_at": 1699145558,
+    "content": "{}",
+    "tags": [
+      [
+        "p",
+        "e17feb5f2cf83546bcf7fd9c8237b05275be958bd521543c2285ffc6c2d654b3"
+      ],
+      [
+        "p",
+        "c5704c447d7712ce28e7098f5237b2a51aeb441e7778265a043f0f7e703846de"
+      ],
+      [
+        "e",
+        "0ac9c447b56b95174b3a44b73e097cba135922558ddf942fe00eb4a701438fad"
+      ],
+      [
+        "t",
+        "inbound-transaction-ok"
+      ]
+    ],
+    "sig": "f6b62d5be292d65882d804af19c4b7a92a5d67276d1a2e3f1b640ffd0a26e24c5ae9cdfc8c4762f360cd43fdacaf623dc6dfa5650c2fb9babc04943be9837469"
+  }
+]
+]
