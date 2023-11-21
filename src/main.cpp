@@ -2,6 +2,7 @@
 #include "env.hpp"
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include <HTTPClient.h>
 #include <NTPClient.h>
 #include <SPIFFS.h>
 #include <WebSocketsClient.h>
@@ -11,7 +12,7 @@
 #include <sstream>
 #include <string>
 
-/// loop ///
+//// loop ////
 StaticJsonDocument<2000> wsDoc;
 DeserializationError wsMsgDesErr;
 
@@ -19,18 +20,11 @@ StaticJsonDocument<512> reqRewriteDoc;
 DeserializationError reqRewriteStrDesErr;
 String createdAtToSince;
 
-/// WSE ///
-File reqWSEFile;
-String reqWSEStr;
+//// WS ////
+File reqWSFile;
+String reqWSStr;
 String reqPrefix = "[\"REQ\",\"query:data\",";
 String reqStrToSend;
-
-unsigned int stringToUnsignedInt(const std::string &str) {
-  std::istringstream iss(str);
-  unsigned int result;
-  iss >> result;
-  return result;
-}
 
 /////////////////////////////////////// NTP ///////////////////////////////////
 WiFiUDP ntpUDP;
@@ -43,52 +37,97 @@ WebSocketsClient webSocket; // declare instance of websocket
 String wsMsg;
 bool newMsg = false;
 
+String reqStr;
+
 void webSocketEvent(WStype_t type, uint8_t *strload, size_t length);
 ////////////////////////////////// end SOCKET /////////////////////////////////
+
+/////////////////////////////// HTTP //////////////////////////////////////////
+
+HTTPClient http;
+
+//////////////////////////////// end HTTP /////////////////////////////////////
 
 void setup() {
   Serial.begin(9600);
   pinMode(BUILTIN_LED, OUTPUT);
 
   //// Conection to WiFi ////
-  Serial.print("Conecting to WiFi");
+  Serial.printf("=== WiFi ===\n");
+  Serial.printf("Conecting to WiFi");
   WiFi.begin(ENV_SSID, ENV_PASS);
   while (WiFi.status() != WL_CONNECTED) {
-    Serial.print(".");
+    Serial.printf(".");
     blinkOnboardLed();
     delay(700);
   }
-  Serial.println("\nWiFi Connected!");
+  Serial.printf("\nWiFi Connected!\n\n\n");
 
   //// Start NTP ////
+  Serial.printf("=== TIME ===\n");
   timeClient.begin();
   timeClient.update();
-  Serial.printf("Start time: %lu\n", timeClient.getEpochTime());
+  Serial.printf("Start time: %lu\n\n\n", timeClient.getEpochTime());
 
   //// Start SPIFFS ////
-  if (!SPIFFS.begin()) {
-    Serial.println("error: not initialized SPIFFS");
-    return;
+  Serial.printf("=== SPIFFS ===\n");
+  if (SPIFFS.begin()) {
+    Serial.printf("Initialized SPIFFS\n\n\n");
   } else {
-    Serial.println("Initialized SPIFFS");
+    Serial.printf("error: not initialized SPIFFS\n\n\n");
+    return;
   }
 
+  //// PUBKEY ////
+  Serial.printf("=== HTTP ===\n");
+  http.begin("https://lawallet.ar/.well-known/nostr.json?name=" + String(ENV_LNADDRESS)); // Specify request destination
+
+  int httpCode = http.GET(); // get request
+
+  String httppayload;
+  if (httpCode) {
+    httppayload = http.getString(); // get response
+    Serial.printf("httpCode: %s\n", httppayload.c_str());
+  } else {
+    Serial.printf("error: not get pubkey\n\n\n");
+    return;
+  }
+
+  http.end(); // Close connection
+
+  // Deserialize httppayload
+  StaticJsonDocument<1024> httpDoc;
+  DeserializationError htttpStrDesErr = deserializeJson(httpDoc, httppayload);
+
+  if (htttpStrDesErr) {
+    Serial.printf("error: not deserialize httppayload: %s\n\n\n", htttpStrDesErr.f_str());
+    return;
+  } else {
+    Serial.printf("htttpayload deserialized successfully\n");
+  }
+
+  String pubkey = (httpDoc["names"][ENV_LNADDRESS]).as<String>();
+  Serial.printf("pubkey: %s\n\n\n", pubkey.c_str());
+
   //// REQ ////
+  Serial.printf("=== REQ ===\n");
   File reqFile = SPIFFS.open("/req-template.json", "r");
   String reqStr;
 
   if (reqFile) {
-    Serial.println("File \"/req-template.json\" opened");
+    Serial.printf("File \"/req-template.json\" opened\n");
     reqStr = reqFile.readString();
     if (reqStr == "") {
-      Serial.println("error: empty file \"/req-template.json\"");
+      Serial.printf("error: empty file \"/req-template.json\"\n\n\n");
       reqFile.close();
+      return;
     } else {
-      Serial.println("File read successfully, content:\n" + reqStr);
+      Serial.printf("File read successfully, content:\n%s\n", reqStr.c_str());
       reqFile.close();
     }
   } else {
-    Serial.println("error: not opened file \"/req-template.json\"");
+    Serial.printf("error: not opened file \"/req-template.json\"\n");
+    return;
   }
 
   // Deserialize reqStr
@@ -96,8 +135,8 @@ void setup() {
   DeserializationError reqStrDesErr = deserializeJson(reqDoc, reqStr);
 
   if (reqStrDesErr) {
-    Serial.print("error: not deserialize reJson: ");
-    Serial.println(reqStrDesErr.f_str());
+    Serial.printf("error: not deserialize reqStr: %s\n\n\n", reqStrDesErr.f_str());
+    return;
   }
 
   if (ENV_KINDS != NULL) {
@@ -106,35 +145,34 @@ void setup() {
       kinds.add(ENV_KINDS[i]);
     }
   }
-  if (ENV_PUBKEYS != NULL) {
+  if (pubkey != NULL) {
     JsonArray pubkeys = reqDoc.createNestedArray("#p");
-    for (int i = 0; i < sizeof(ENV_PUBKEYS) / sizeof(ENV_PUBKEYS[0]); i++) {
-      pubkeys.add(ENV_PUBKEYS[i]);
-    }
+    pubkeys.add(pubkey);
   }
   reqDoc["since"] = (unsigned int)(timeClient.getEpochTime());
   reqDoc["until"] = ENV_UNTIL;
-  Serial.println("Variables loaded to reqDoc");
+  Serial.printf("Variables loaded to reqDoc\n");
 
   // Serialize newReqStr
   String newReqStr;
   serializeJson(reqDoc, newReqStr);
-  Serial.println("New content of newReqStr: " + newReqStr);
+  Serial.printf("New content of newReqStr: %s\n", newReqStr.c_str());
 
   // Save data
   File newReqFile = SPIFFS.open("/req-data.json", "w");
   if (!newReqFile) {
-    Serial.println("error: not opened file \"/req-data.json\"");
+    Serial.printf("error: not opened file \"/req-data.json\"\n\n\n");
     return;
   } else {
-    Serial.println("File \"/req-data.json\" opened");
+    Serial.printf("File \"/req-data.json\" opened\n");
     newReqFile.print(newReqStr);
-    Serial.println("New content of file \"/req-data.json\": " + newReqStr);
+    Serial.printf("New content of file \"/req-data.json\": %s\n\n\n", newReqStr.c_str());
     newReqFile.close();
   }
 
-  // Conection to websocket ////
-  Serial.print("Conceting to websocket");
+  //// Conection to websocket ////
+  Serial.printf("=== WebSocket ===\n");
+  Serial.printf("Conceting to websocket");
 
   webSocket.beginSSL(ENV_WSURL, 443);
   webSocket.onEvent(webSocketEvent);
@@ -144,21 +182,21 @@ void setup() {
     blinkOnboardLed();
     webSocket.loop();
   }
-  Serial.println("Conceted to websocket!");
+  Serial.printf("Conceted to websocket!\n\n\n");
 }
 
 void loop() {
   while (newMsg == false) {
     //// Check WiFi ////
     if (WiFi.status() != WL_CONNECTED) {
-      Serial.println("WiFi disconnected");
-      Serial.print("Reconecting to WiFi");
+      Serial.printf("WiFi disconnected\n");
+      Serial.printf("Reconecting to WiFi");
       while (WiFi.status() != WL_CONNECTED) {
-        Serial.print(".");
+        Serial.printf(".");
         blinkOnboardLed();
         delay(700);
       }
-      Serial.print("\nWiFi reconnected!");
+      Serial.printf("\nWiFi reconnected!\n");
     }
 
     //// Check websocket ////
@@ -166,35 +204,34 @@ void loop() {
   }
 
   //// Recive messagge ////
-  /// Print data of event
-  Serial.println("--------------------------------------------");
-  Serial.println("==> New message:\n" + wsMsg);
+  // Print data of event
+  Serial.printf("!--------------------------------------------\n");
+  Serial.printf("==> New message:\n%s\n", wsMsg.c_str());
 
-  /// Deserialize wsMsg
+  // Deserialize wsMsg
   wsMsgDesErr = deserializeJson(wsDoc, wsMsg);
 
   if (wsMsgDesErr) {
-    Serial.print("error: not deserialize wsMsg: ");
-    Serial.println(wsMsgDesErr.f_str());
+    Serial.printf("error: not deserialize wsMsg: %s\n", wsMsgDesErr.f_str());
   }
-  Serial.println("----------------------");
+  Serial.printf("----------------------\n");
 
-  /// Print data of event
+  // Print data of event
   if (wsDoc[0].as<String>() == "EOSE") {
-    Serial.println("EOSE: end of stream");
+    Serial.printf("EOSE: end of stream\n");
   } else {
-    Serial.println("EVENT CONTENT");
-    Serial.println("id: " + wsDoc[2]["id"].as<String>());
-    Serial.println("kind: " + wsDoc[2]["kind"].as<String>());
-    Serial.println("pubkey: " + wsDoc[2]["pubkey"].as<String>());
+    Serial.printf("EVENT CONTENT\n");
+    Serial.printf("id: %s\n", (wsDoc[2]["id"].as<String>()).c_str());
+    Serial.printf("kind: %s\n", (wsDoc[2]["kind"].as<String>()).c_str());
+    Serial.printf("pubkey: %s\n", (wsDoc[2]["pubkey"].as<String>()).c_str());
     createdAtToSince = wsDoc[2]["created_at"].as<String>();
-    Serial.println("created_at: " + createdAtToSince);
-    Serial.println("content: " + wsDoc[2]["content"].as<String>());
-    for (size_t i = 0; i < 4; i++) {
-      Serial.println("tags: " + wsDoc[2]["tags"][i].as<String>());
+    Serial.printf("created_at: %s\n", createdAtToSince.c_str());
+    Serial.printf("content: %s\n", (wsDoc[2]["content"].as<String>()).c_str());
+    for (size_t i = 0; i < (wsDoc[2]["tags"]).size(); i++) {
+      Serial.printf("tags: %s\n", (wsDoc[2]["tags"][i].as<String>()).c_str());
     }
-    Serial.println("sig: " + wsDoc[2]["sig"].as<String>());
-    Serial.println("----------------------");
+    Serial.printf("sig: %s\n", (wsDoc[2]["sig"].as<String>()).c_str());
+    Serial.printf("----------------------\n");
 
     //// rewrite since in /req-data.json ////
     // Open /req-data.json
@@ -202,54 +239,65 @@ void loop() {
     String reqRewriteStr;
 
     if (reqRewriteFile) {
-      Serial.println("File \"/req-data.json\" opened");
+      Serial.printf("File \"/req-data.json\" opened\n");
       reqRewriteStr = reqRewriteFile.readString();
       if (reqRewriteStr == "") {
-        Serial.println("error: empty file \"/req-data.json\"");
+        Serial.printf("error: empty file \"/req-data.json\"\n\n");
         reqRewriteFile.close();
         return;
       } else {
-        Serial.println("File read successfully, content:\n" + reqRewriteStr);
+        Serial.printf("File read successfully, content:\n%s\n", reqRewriteStr.c_str());
         reqRewriteFile.close();
       }
     } else {
-      Serial.println("error: not opened file \"/req-data.json\"");
+      Serial.printf("error: not opened file \"/req-data.json\"\n\n");
+      return;
     }
 
     // Deserialize reqRewriteStr
     reqRewriteStrDesErr = deserializeJson(reqRewriteDoc, reqRewriteStr);
 
     if (reqRewriteStrDesErr) {
-      Serial.print("error: not deserialize reqRewriteStr");
-      Serial.println(reqRewriteStrDesErr.f_str());
+      Serial.printf("error: not deserialize reqRewriteStr %s\n\n", reqRewriteStrDesErr.f_str());
+      return;
     }
 
     // Rewrite since
     reqRewriteDoc["since"] = createdAtToSince.toInt() + 10;
-    Serial.print("since rewrite successfully with: ");
-    Serial.println(createdAtToSince.toInt() + 10);
+    Serial.printf("since rewrite successfully with: %d\n", createdAtToSince.toInt() + 10);
 
     // Serialize newReqRewriteStr
     String newReqRewriteStr;
     serializeJson(reqRewriteDoc, newReqRewriteStr);
-    Serial.println("New content of newReqRewriteStr: " + newReqRewriteStr);
+    Serial.printf("New content of newReqRewriteStr: %s\n", newReqRewriteStr.c_str());
 
     // Save data
     reqRewriteFile = SPIFFS.open("/req-data.json", "w");
     if (!reqRewriteFile) {
-      Serial.println("error: not opened file \"/req-data.json\"");
+      Serial.printf("error: not opened file \"/req-data.json\"\n\n");
       return;
     } else {
-      Serial.println("File \"/req-data.json\" opened");
+      Serial.printf("File \"/req-data.json\" opened\n");
       reqRewriteFile.print(newReqRewriteStr);
-      Serial.println("New content of file \"/req-data.json\": " + newReqRewriteStr);
+      Serial.printf("New content of file \"/req-data.json\": \n%s\n", newReqRewriteStr.c_str());
       reqRewriteFile.close();
     }
   }
-  Serial.println("==> End of message");
-  Serial.println("--------------------------------------------");
+  Serial.printf("==> End of message\n");
+  Serial.printf("!--------------------------------------------\n");
 
   newMsg = false;
+
+  //// Hadware Notice ////
+
+  StaticJsonDocument<128> contentDoc;
+  DeserializationError contentDesErr = deserializeJson(contentDoc, wsDoc[2]["content"].as<String>());
+
+  if (contentDesErr) {
+    Serial.printf("error: not deserialize content: %s\n", contentDesErr.f_str());
+  }
+
+  Serial.printf("1. Amount: %d\n", contentDoc["tokens"]["BTC"].as<int>());
 }
 
 ////////////////// WEBSOCKET ///////////////////
@@ -257,36 +305,36 @@ void loop() {
 void webSocketEvent(WStype_t type, uint8_t *strload, size_t length) {
   switch (type) {
   case WStype_DISCONNECTED:
-    Serial.println("[WS] Disconnected!");
+    Serial.printf("[WS] Disconnected!\n");
     break;
   case WStype_CONNECTED:
-    Serial.println("\n[WS] Connected");
-    /// Obtain reqWSEStr ///
-    reqWSEFile = SPIFFS.open("/req-data.json", "r");
+    Serial.printf("\n[WS] Connected\n");
+    /// Obtain reqWSStr ///
+    reqWSFile = SPIFFS.open("/req-data.json", "r");
 
-    if (reqWSEFile) {
-      Serial.println("File \"/req-data.json\" opened");
-      reqWSEStr = reqWSEFile.readString();
-      if (reqWSEStr == "") {
-        Serial.println("error: empty file \"/req-data.json\"");
-        reqWSEFile.close();
+    if (reqWSFile) {
+      Serial.printf("File \"/req-data.json\" opened\n");
+      reqWSStr = reqWSFile.readString();
+      if (reqWSStr == "") {
+        Serial.printf("error: empty file \"/req-data.json\"\n\n");
+        reqWSFile.close();
         break;
       } else {
-        Serial.println("File read successfully, content:\n" + reqWSEStr);
-        reqWSEFile.close();
+        Serial.printf("File read successfully, content: \n%s\n", reqWSStr.c_str());
+        reqWSFile.close();
       }
     } else {
-      Serial.println("error: not opened file \"/req-data.json\"");
+      Serial.printf("error: not opened file \"/req-data.json\"\n\n");
       break;
     }
 
-    reqStrToSend = reqPrefix + reqWSEStr + "]";
-    Serial.println("Sending message to server: " + reqStrToSend);
+    reqStrToSend = reqPrefix + reqWSStr + "]";
+    Serial.printf("Sending message to server: \n%s\n", reqStrToSend.c_str());
     webSocket.sendTXT(reqStrToSend); // send message to server when Connected
     break;
   case WStype_TEXT:
     wsMsg = (char *)strload;
-    Serial.println("\nReceived data from socket");
+    Serial.printf("\n=== Received data from socket ===\n");
     newMsg = true;
     break;
   case WStype_ERROR:
