@@ -1,5 +1,6 @@
 #include "auxiliars.hpp"
 #include "env.hpp"
+#include <Adafruit_Thermal.h>
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
