@@ -3,6 +3,7 @@
 #include <Adafruit_Thermal.h>
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include <BluetoothSerial.h>
 #include <HTTPClient.h>
 #include <NTPClient.h>
 #include <SPIFFS.h>
@@ -48,6 +49,14 @@ void webSocketEvent(WStype_t type, uint8_t *strload, size_t length);
 HTTPClient http;
 
 //////////////////////////////// end HTTP /////////////////////////////////////
+
+/////////////////////////////// BLUETOOTH /////////////////////////////////////
+BluetoothSerial SerialBT;
+//////////////////////////////// end BLUETOOTH ///////////////////////////////
+
+/////////////////////////////// PRINTER ///////////////////////////////////////
+Adafruit_Thermal printer(&SerialBT);
+//////////////////////////////// end PRINTER ///////////////////////////////////
 
 void setup() {
   Serial.begin(9600);
@@ -331,6 +340,11 @@ void loop() {
 
     amount /= 1000;
     // Serial.printf("1. Amount: %d sats\n", amount);
+
+    printer.wake();
+    printer.println("Amount recived: " + String(amount) + " sats");
+    printer.feed(2);
+    printer.sleep();
 
     while (true) {
       amount /= 10;
